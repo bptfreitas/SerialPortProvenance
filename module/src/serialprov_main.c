@@ -17,7 +17,15 @@
  * from some kind of hardware.
  */
 
+#include <linux/export.h>
+#include <linux/fs.h>
+#include <linux/kref.h>
+#include <linux/list.h>
+#include <linux/cdev.h>
 
+#include <linux/uaccess.h>
+#include <linux/termios.h>
+#include <linux/seq_file.h>
 
 #include <linux/kernel.h>
 #include <linux/device.h>
@@ -307,17 +315,28 @@ static void __exit virtualbot_exit(void)
 }
 #endif
 
+extern struct list_head tty_drivers;
+
 static int __init serialprov_init(void)
 {
 	pr_debug("serialprov: Serial Device Provenance init");
-	    
-	struct device_node *device = NULL;
 	
-	device = of_find_node_by_name(NULL, "usbserial");
+	struct list_head *pos = NULL;
 	
-	if (device != NULL){
+	list_for_each(pos, &tty_drivers) {
 	
-		pr_debug("serialprov: device found");
+           //printk(KERN_INFO "Node %d data = %d\n", count++, temp->data);
+                     
+		struct tty_driver *p = list_entry(pos, struct tty_driver, tty_drivers);
+		
+		pr_debug( "serialprov: driver %s", p->driver_name );
+
+    }
+	    	
+	if (pos != NULL){
+	
+		pr_debug("serialprov: root device found");
+		
 	}
  
 	return 0;
@@ -328,6 +347,7 @@ static void __exit serialprov_exit(void)
 {
 
 	pr_debug("serialprov: exiting driver");
+	
 }
 
 module_init(serialprov_init);
