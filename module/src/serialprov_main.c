@@ -17,6 +17,8 @@
  * from some kind of hardware.
  */
 
+#include <linux/module.h>
+
 #include <linux/export.h>
 #include <linux/fs.h>
 #include <linux/kref.h>
@@ -31,7 +33,7 @@
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/init.h>
-#include <linux/module.h>
+
 #include <linux/slab.h>
 #include <linux/wait.h>
 #include <linux/tty.h>
@@ -315,38 +317,58 @@ static void __exit virtualbot_exit(void)
 }
 #endif
 
-extern struct list_head tty_drivers;
+static struct tty_struct *tty_to_listen;
 
 static int __init serialprov_init(void)
 {
 	pr_debug("serialprov: Serial Device Provenance init");
 	
-	struct list_head *pos = NULL;
+	int retval;
 	
-	list_for_each(pos, &tty_drivers) {
+	tty_to_listen = NULL;
 	
-           //printk(KERN_INFO "Node %d data = %d\n", count++, temp->data);
-                     
-		struct tty_driver *p = list_entry(pos, struct tty_driver, tty_drivers);
-		
-		pr_debug( "serialprov: driver %s", p->driver_name );
+	char serial_device[] = "tty25";
 
-    }
-	    	
-	if (pos != NULL){
+	dev_t device;	
 	
-		pr_debug("serialprov: root device found");
+	retval = tty_dev_name_to_number( serial_device, &device );
+	
+	if (retval == -ENODEV ){
+		pr_err("serialprov: couldn't open device %s!", serial_device);
 		
+		goto ret_error;
 	}
- 
+	
+	tty_to_listen = tty_kopen_shared(device);
+	
+	if (tty_to_listen == NULL){
+	
+		retval = -1;
+	
+		pr_err("serialprov: error loading tty_struct!");
+		
+		goto ret_error;		
+	}
+	
+	pr_info("serialprov: Serial Device Provenance module initialized");
+	
 	return 0;
+	
+ret_error:
+
+	return retval;		
 }
 
 
 static void __exit serialprov_exit(void)
 {
-
 	pr_debug("serialprov: exiting driver");
+	
+	if ( tty_to_listen != NULL ){
+	
+		tty_kclose( tty_to_listen );
+		
+	}
 	
 }
 
