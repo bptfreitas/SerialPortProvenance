@@ -4,7 +4,7 @@ KDIR ?= /lib/modules/`uname -r`/build
 MODULES_DEP = /lib/modules/$(shell uname -r)/modules.dep
 
 # VirtualBot Driver name
-SERIALPROV_NAME="serialprov"
+SERIALPROV_NAME = serialprov
 
 # VirtualBot device name
 SERIALPROV_DEVICE=/dev/$(SERIALPROV_NAME)

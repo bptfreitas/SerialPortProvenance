@@ -317,7 +317,9 @@ static void __exit virtualbot_exit(void)
 }
 #endif
 
-static struct tty_struct *tty_to_listen;
+static struct tty_struct *tty_struct_to_listen;
+
+static struct tty_port *tty_port_to_listen;
 
 static int __init serialprov_init(void)
 {
@@ -325,23 +327,27 @@ static int __init serialprov_init(void)
 	
 	int retval;
 	
-	tty_to_listen = NULL;
+	tty_struct_to_listen = NULL;
+	tty_port_to_listen = NULL;	
 	
-	char serial_device[] = "tty25";
+	char serial_device[] = "tty4";
 
 	dev_t device;	
 	
 	retval = tty_dev_name_to_number( serial_device, &device );
 	
 	if (retval == -ENODEV ){
+	
 		pr_err("serialprov: couldn't open device %s!", serial_device);
 		
 		goto ret_error;
-	}
+	} 
 	
-	tty_to_listen = tty_kopen_shared(device);
+	pr_debug("serialprov: MAJOR = %d, MINOR = %d", MAJOR(device), MINOR(device) );
 	
-	if (tty_to_listen == NULL){
+	tty_struct_to_listen = tty_kopen_exclusive(device);
+	
+	if (tty_struct_to_listen == NULL){
 	
 		retval = -1;
 	
@@ -350,9 +356,24 @@ static int __init serialprov_init(void)
 		goto ret_error;		
 	}
 	
+	tty_port_to_listen = tty_struct_to_listen->port;
+	
+	if (tty_port_to_listen == NULL){
+	
+		retval = -1;
+	
+		pr_err("serialprov: error loading tty_port!");
+		
+		goto free_tty_struct;		
+	}	
+			
 	pr_info("serialprov: Serial Device Provenance module initialized");
 	
 	return 0;
+	
+free_tty_struct:
+
+	tty_kclose( tty_struct_to_listen );
 	
 ret_error:
 
@@ -364,9 +385,9 @@ static void __exit serialprov_exit(void)
 {
 	pr_debug("serialprov: exiting driver");
 	
-	if ( tty_to_listen != NULL ){
+	if ( tty_struct_to_listen != NULL ){
 	
-		tty_kclose( tty_to_listen );
+		tty_kclose( tty_struct_to_listen );
 		
 	}
 	
