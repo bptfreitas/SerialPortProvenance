@@ -57,6 +57,8 @@
 #define DRIVER_AUTHOR "Bruno Policarpo <bruno.freitas@cefet-rj.br>"
 #define DRIVER_DESC "SerialProv Driver"
 
+#define DELAY_TIME 2
+
 /* Module information */
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
@@ -321,6 +323,23 @@ static struct tty_struct *tty_struct_to_listen;
 
 static struct tty_port *tty_port_to_listen;
 
+struct timer_list listener_timer;
+
+
+static void tty_listener(struct timer_list *t)
+{
+	pr_debug("serialprov: running listener");
+
+	/* resubmit the timer again */		
+	timer_setup(t, tty_listener, 0);
+
+	t->expires = jiffies + DELAY_TIME;
+
+	add_timer(t);
+}
+
+
+
 static int __init serialprov_init(void)
 {
 	pr_debug("serialprov: Serial Device Provenance init");
@@ -366,6 +385,12 @@ static int __init serialprov_init(void)
 		
 		goto free_tty_struct;		
 	}	
+	
+	timer_setup(&listener_timer, tty_listener, 0);
+
+	listener_timer.expires = jiffies + DELAY_TIME;
+
+	add_timer(&listener_timer);
 			
 	pr_info("serialprov: Serial Device Provenance module initialized");
 	
@@ -385,10 +410,20 @@ static void __exit serialprov_exit(void)
 {
 	pr_debug("serialprov: exiting driver");
 	
+	int retval;
+	
 	if ( tty_struct_to_listen != NULL ){
 	
 		tty_kclose( tty_struct_to_listen );
 		
+	}
+	
+	retval = del_timer( &listener_timer );
+	
+	if (retval != 0 ){
+	
+		pr_err("Error deleting timer!");
+	
 	}
 	
 }
