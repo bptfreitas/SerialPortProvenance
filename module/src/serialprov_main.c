@@ -57,12 +57,70 @@
 #define DRIVER_AUTHOR "Bruno Policarpo <bruno.freitas@cefet-rj.br>"
 #define DRIVER_DESC "SerialProv Driver"
 
-#define DELAY_TIME 2*HZ
+#define DELAY_TIME HZ
 
 /* Module information */
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
+
+// static char buffer[256];
+
+
+static struct serialprov_dev *serialprov_devices;
+
+
+ssize_t serialprov_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
+{
+
+
+	return 0;
+
+
+}
+
+
+int serialprov_open(struct inode *inode, struct file *filp)
+{
+	struct serialprov_dev *dev; /* device information */
+
+#if 0
+	dev = container_of(inode->i_cdev, struct serialprov_dev, cdev);
+	
+	filp->private_data = dev; /* for other methods */
+
+	/* now trim to 0 the length of the device if open was write-only */
+	if ( (filp->f_flags & O_ACCMODE) == O_WRONLY) {
+		if (down_interruptible(&dev->sem))
+			return -ERESTARTSYS;
+
+		scull_trim(dev); /* ignore errors */
+		up(&dev->sem);
+	}
+	
+#endif	
+	
+	
+	return 0;          /* success */
+}
+
+
+int serialprov_release(struct inode *inode, struct file *filp)
+{
+	return 0;
+}
+
+
+static struct file_operations serialprov_fops = {
+	.owner   = THIS_MODULE,
+//	.llseek =   serialprov_llseek,
+	.read =     serialprov_read,
+//	.write =    serialprov_write,
+	.open =     serialprov_open,
+	.release =  serialprov_release
+};
+
+
 
 
 static struct tty_struct *tty_struct_to_listen;
@@ -71,12 +129,17 @@ static struct tty_port *tty_port_to_listen;
 
 struct timer_list listener_timer;
 
+static int counter = 0;
 
 static void tty_listener(struct timer_list *t)
 {
 	pr_debug("serialprov: running listener");
 	
+	// struct tty_buffer *p, *next;	
+	
 	tty_port_to_listen = tty_struct_to_listen->port;
+	
+	struct tty_bufhead *buf;
 	
 	if (tty_port_to_listen == NULL){
 	
@@ -87,7 +150,70 @@ static void tty_listener(struct timer_list *t)
 	} else {
 	
 		// Pointer is valid, get data
-	
+		
+		tty_buffer_lock_exclusive (tty_port_to_listen);
+		
+		buf = &(tty_port_to_listen->buf);
+		
+		pr_debug( "serialprov: PING %d", counter++ );
+
+		pr_debug("serialprov: buf->head = %p", buf->head );
+		
+		pr_debug("serialprov: buf->mem_limit = %u", buf->mem_limit );
+		
+		if (buf->head != NULL){
+			pr_debug("serialprov: buf->head->used = %d", buf->head->used );		
+			pr_debug("serialprov: buf->head->size = %d", buf->head->size );			
+			pr_debug("serialprov: buf->head->commit = %d", buf->head->commit );
+			pr_debug("serialprov: buf->head->next = %p", buf->head->next );			
+			pr_debug("serialprov: buf->head->read = %d", buf->head->read );
+			
+			
+			u8 *c = char_buf_ptr(buf->head, buf->head->read);
+			
+			pr_debug("serialprov: buf->head[0] = %c", c[ 0 ] );
+			
+						
+		} else {
+			pr_warn("serialprov: buf->head is a NULL pointer!");
+		}
+				
+#if 0	
+		pr_debug("serialprov: buf->tail = %p", buf->tail );				
+		if (buf->tail != NULL){
+
+			pr_debug("serialprov: buf->tail->used = %d", buf->tail->used );						
+			pr_debug("serialprov: buf->tail->size = %d", buf->tail->size );			
+			pr_debug("serialprov: buf->tail->commit = %d", buf->tail->commit );			
+			pr_debug("serialprov: buf->tail->next = %p", buf->tail->next );			
+			pr_debug("serialprov: buf->tail->read = %d", buf->tail->read );
+		
+			for ( int i =0; i < 254; i++){
+						
+				pr_debug("serialprov: [debug] buf->tail->data[ %d ] = %lx", 
+					i, 
+					buf->tail->data[ i ] );
+													
+			}		
+				
+		} else {
+			pr_warn("serialprov: buf->tail is a NULL pointer!");
+		}		
+#endif	
+		
+
+#if 0
+		while ( (p = buf->head) != NULL) {
+		
+			//pr_debug( "\nsize: %d", p->size );
+		
+		
+			p = p->next;
+		}
+#endif		
+
+		
+		tty_buffer_unlock_exclusive (tty_port_to_listen);
 	}
 
 	/* resubmit the timer again */		
@@ -109,11 +235,11 @@ static int __init serialprov_init(void)
 	tty_struct_to_listen = NULL;
 	tty_port_to_listen = NULL;	
 	
-	char serial_device[] = "tty4";
+	char serial_device[] = "ttyUSB1";
 
-	dev_t device;	
+	dev_t devno_to_listen, userspace_devno;	
 	
-	retval = tty_dev_name_to_number( serial_device, &device );
+	retval = tty_dev_name_to_number( serial_device, &devno_to_listen );
 	
 	if (retval == -ENODEV ){
 	
@@ -122,9 +248,11 @@ static int __init serialprov_init(void)
 		goto ret_error;
 	} 
 	
-	pr_debug("serialprov: MAJOR = %d, MINOR = %d", MAJOR(device), MINOR(device) );
+	pr_debug("serialprov: MAJOR = %d, MINOR = %d", 
+		MAJOR(devno_to_listen), 
+		MINOR(devno_to_listen) );
 	
-	tty_struct_to_listen = tty_kopen_exclusive(device);
+	tty_struct_to_listen = tty_kopen_shared(devno_to_listen);
 	
 	if (tty_struct_to_listen == NULL){
 	
@@ -135,6 +263,45 @@ static int __init serialprov_init(void)
 		goto ret_error;		
 	}
 	
+	retval = alloc_chrdev_region( &userspace_devno, 
+		0, 
+		1,
+		"serialprov");
+		
+	if (retval != 0 ){
+	
+		pr_err("serialprov: couldn't allocate userspace char device!");
+	
+		goto free_tty_struct;	
+	
+	}	
+	
+	// Alocacao do arquivo especial
+	serialprov_devices = kmalloc( sizeof(struct serialprov_dev) , GFP_KERNEL );
+	
+	if (!serialprov_devices){
+	
+		pr_err("serialprov: error allocating serialprov device!");
+	
+		goto free_chr_device;
+	}
+	
+	serialprov_devices->devno = userspace_devno;
+	
+	cdev_init(&serialprov_devices->cdev, &serialprov_fops);
+	
+	serialprov_devices->cdev.owner = THIS_MODULE;
+	retval = cdev_add(&serialprov_devices->cdev, userspace_devno, 1);
+	
+	if (retval){
+		pr_err("serialprov: error allocating ");
+		
+		goto free_serialprov_dev;
+	
+	}
+	
+	
+	// Timer eh a ultima coisa a instanciar
 	timer_setup(&listener_timer, tty_listener, 0);
 
 	listener_timer.expires = jiffies + DELAY_TIME;
@@ -145,6 +312,14 @@ static int __init serialprov_init(void)
 	
 	return 0;
 	
+free_serialprov_dev:
+
+	kfree( serialprov_devices );
+	
+free_chr_device:
+
+	unregister_chrdev_region( userspace_devno, 1 );
+
 free_tty_struct:
 
 	tty_kclose( tty_struct_to_listen );
@@ -161,19 +336,33 @@ static void __exit serialprov_exit(void)
 	
 	int retval;
 	
-	if ( tty_struct_to_listen != NULL ){
-	
-		tty_kclose( tty_struct_to_listen );
-		
-	}
-	
 	retval = del_timer( &listener_timer );
 	
 	if (retval != 0 ){
 	
-		pr_info("Active tty_listener deleted");
+		pr_info("serialprov: Active tty_listener deleted");
 	
 	}
+	
+	
+	if ( tty_struct_to_listen != NULL ){
+		
+		tty_kclose( tty_struct_to_listen );
+		
+		pr_info("serialprov: Closing openned tty device");
+		
+	}
+	
+	cdev_del(&serialprov_devices->cdev);
+	
+	pr_debug("serialprov: cdev_del");	
+	
+	unregister_chrdev_region(serialprov_devices->devno, 1);
+	
+	pr_debug("serialprov: unregister_chrdev_region");		
+	
+	kfree( serialprov_devices );
+	
 	
 }
 

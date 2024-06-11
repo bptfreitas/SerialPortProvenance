@@ -49,6 +49,8 @@ struct serialprov_dev {
 	// unsigned long size;       /* amount of data stored here */
 	// struct semaphore sem;     /* mutual exclusion semaphore     */
 	struct cdev cdev;	  /* Char device structure		*/
+	
+	dev_t devno;
 };
 
 #endif
