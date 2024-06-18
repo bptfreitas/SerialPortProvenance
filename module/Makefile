@@ -44,7 +44,8 @@ check_device_logs:
 	sudo dmesg
 
 install:
-	sudo modprobe $(SERIALPROV_NAME)
+	sudo modprobe $(SERIALPROV_NAME)	
+	sudo mknod /dev/$(SERIALPROV_NAME) c $(shell egrep "$(SERIALPROV_NAME)" /proc/devices | cut -d" " -f1) 0
 
 uninstall:
 	sudo rm -f /dev/$(SERIALPROV_NAME)
