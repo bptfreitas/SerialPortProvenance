@@ -4,11 +4,11 @@
 
 #include <linux/module.h>
 
-#define SERIALPROV_DRIVER_NAME "emulatedport_tty"
+// #define SERIALPROV_DRIVER_NAME "emulatedport_tty"
 
-#define SERIALPROV_TTY_NAME "ttyEmulatedPort"
+// #define SERIALPROV_TTY_NAME "ttyEmulatedPort"
 
-#define SERIALPROV_TTY_MAJOR 200
+// #define SERIALPROV_TTY_MAJOR 200
 
 //#define VB_COMM_DRIVER_NAME "exogenous_tty"
 
@@ -40,14 +40,20 @@
 */
 //#define IGNORE_CHAR_CBUFFER_SIZE 512
 
-//#define CBUFFER_SIZE 1024
+#define SNOOP_BUFFER_SIZE 1024
 
 struct serialprov_dev {
 	// struct scull_qset *data;  /* Pointer to first quantum set */
 	//int quantum;              /* the current quantum size */
 	// int qset;                 /* the current array size */
 	// unsigned long size;       /* amount of data stored here */
-	// struct semaphore sem;     /* mutual exclusion semaphore     */
+	
+	
+	unsigned char snoop_buf[ SNOOP_BUFFER_SIZE ];
+	struct semaphore snoop_buf_lock;
+	
+	struct semaphore sem;     /* mutual exclusion semaphore     */
+	
 	struct cdev cdev;	  /* Char device structure		*/
 	
 	dev_t devno;

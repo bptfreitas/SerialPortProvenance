@@ -57,7 +57,7 @@
 #define DRIVER_AUTHOR "Bruno Policarpo <bruno.freitas@cefet-rj.br>"
 #define DRIVER_DESC "SerialProv Driver"
 
-#define DELAY_TIME HZ
+#define DELAY_TIME (HZ/10)
 
 /* Module information */
 MODULE_AUTHOR(DRIVER_AUTHOR);
@@ -70,24 +70,63 @@ MODULE_LICENSE("GPL");
 static struct serialprov_dev *serialprov_devices;
 
 
+char fake_buffer[256];
+
 ssize_t serialprov_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
 {
+	pr_debug("serialprov: starting a read (count = %ld, *f_pos = %lld)",
+		count,
+		*f_pos);			
+	
+	struct serialprov_dev *dev;
+	
+	size_t retval = 0;
+	
+	if ( *f_pos >= SNOOP_BUFFER_SIZE ){
+	
+		goto read_exit;
+		
+	}
+	
+	dev = filp->private_data;
+	
+	down( &dev->snoop_buf_lock );
+
+	retval = copy_to_user( buf, 
+		&dev->snoop_buf,
+		256);
+							
+	up( &dev->snoop_buf_lock );
+
+	retval = SNOOP_BUFFER_SIZE; 
+	
+	*f_pos = SNOOP_BUFFER_SIZE;
 
 
-	return 0;
+read_exit:
 
-
+	return retval;
 }
 
 
 int serialprov_open(struct inode *inode, struct file *filp)
 {
 	struct serialprov_dev *dev; /* device information */
-
-#if 0
-	dev = container_of(inode->i_cdev, struct serialprov_dev, cdev);
+	
+	pr_debug("serialprov: userspace interface open");
+	
+	dev = container_of(inode->i_cdev, struct serialprov_dev, cdev);	
+	
+	down( &dev->sem );
 	
 	filp->private_data = dev; /* for other methods */
+	
+	// fake buffer fill
+	for (int i=0; i< 256; fake_buffer[i++] = 'A');
+	
+	fake_buffer[255] = '\0';
+
+#if 0
 
 	/* now trim to 0 the length of the device if open was write-only */
 	if ( (filp->f_flags & O_ACCMODE) == O_WRONLY) {
@@ -99,7 +138,9 @@ int serialprov_open(struct inode *inode, struct file *filp)
 	}
 	
 #endif	
-	
+
+
+	up( &dev->sem );	
 	
 	return 0;          /* success */
 }
@@ -107,6 +148,8 @@ int serialprov_open(struct inode *inode, struct file *filp)
 
 int serialprov_release(struct inode *inode, struct file *filp)
 {
+	pr_debug("serialprov: closing userspace interface");
+	
 	return 0;
 }
 
@@ -141,6 +184,10 @@ static void tty_listener(struct timer_list *t)
 	
 	struct tty_bufhead *buf;
 	
+	struct serialprov_dev *dev;
+	
+	dev = serialprov_devices;
+	
 	if (tty_port_to_listen == NULL){
 	
 		// Pointer is null, port is not open - abort
@@ -150,6 +197,12 @@ static void tty_listener(struct timer_list *t)
 	} else {
 	
 		// Pointer is valid, get data
+		
+		if (dev == NULL){
+			goto resubmit;
+		}
+		
+		unsigned char *buffer = serialprov_devices->snoop_buf;
 		
 		tty_buffer_lock_exclusive (tty_port_to_listen);
 		
@@ -211,11 +264,22 @@ static void tty_listener(struct timer_list *t)
 			p = p->next;
 		}
 #endif		
-
+		
+		down( &dev->snoop_buf_lock);
+		
+		memcpy_and_pad( &dev->snoop_buf, 
+			sizeof(unsigned char) * SNOOP_BUFFER_SIZE ,
+			buf->head->data,
+			sizeof( u8 ) * SNOOP_BUFFER_SIZE,
+			0);
+			
+		up( &dev->snoop_buf_lock );	
+			
 		
 		tty_buffer_unlock_exclusive (tty_port_to_listen);
 	}
 
+resubmit:
 	/* resubmit the timer again */		
 	timer_setup(t, tty_listener, 0);
 
@@ -224,7 +288,7 @@ static void tty_listener(struct timer_list *t)
 	add_timer(t);
 }
 
-
+dev_t devno_to_listen;
 
 static int __init serialprov_init(void)
 {
@@ -235,9 +299,9 @@ static int __init serialprov_init(void)
 	tty_struct_to_listen = NULL;
 	tty_port_to_listen = NULL;	
 	
-	char serial_device[] = "ttyUSB1";
+	char serial_device[] = "ttyUSB0";
 
-	dev_t devno_to_listen, userspace_devno;	
+	dev_t userspace_devno;	
 	
 	retval = tty_dev_name_to_number( serial_device, &devno_to_listen );
 	
@@ -248,7 +312,7 @@ static int __init serialprov_init(void)
 		goto ret_error;
 	} 
 	
-	pr_debug("serialprov: MAJOR = %d, MINOR = %d", 
+	pr_debug("serialprov: serial device to listen (MAJOR = %d, MINOR = %d)", 
 		MAJOR(devno_to_listen), 
 		MINOR(devno_to_listen) );
 	
@@ -286,11 +350,16 @@ static int __init serialprov_init(void)
 		goto free_chr_device;
 	}
 	
+	sema_init( &serialprov_devices->sem , 1 );
+	
+	sema_init( &serialprov_devices->snoop_buf_lock , 1 );
+	
 	serialprov_devices->devno = userspace_devno;
 	
 	cdev_init(&serialprov_devices->cdev, &serialprov_fops);
 	
 	serialprov_devices->cdev.owner = THIS_MODULE;
+	
 	retval = cdev_add(&serialprov_devices->cdev, userspace_devno, 1);
 	
 	if (retval){
@@ -336,6 +405,8 @@ static void __exit serialprov_exit(void)
 	
 	int retval;
 	
+	int kref_count;
+	
 	retval = del_timer( &listener_timer );
 	
 	if (retval != 0 ){
@@ -344,10 +415,11 @@ static void __exit serialprov_exit(void)
 	
 	}
 	
+	// atomic_read( )
 	
 	if ( tty_struct_to_listen != NULL ){
 		
-		tty_kclose( tty_struct_to_listen );
+		tty_release_struct( tty_struct_to_listen, MINOR( devno_to_listen )  );
 		
 		pr_info("serialprov: Closing openned tty device");
 		

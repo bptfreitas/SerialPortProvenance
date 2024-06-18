@@ -51,7 +51,6 @@ uninstall:
 	sudo rm -f /dev/$(SERIALPROV_NAME)
 	sudo modprobe -r $(SERIALPROV_NAME)
 #	sudo rm -f /lib/modules/`uname -r`/extra/virtualbot.ko
-	sudo depmod
 
 tests:
 	sudo dmesg -C
