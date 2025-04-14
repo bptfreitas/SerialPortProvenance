@@ -1,3 +1,7 @@
 *.o
 *.ko
 *.cmd
+Module.symvers
+modules.order
+serialprov.mod
+serialprov.mod.c
